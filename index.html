@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="km">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Khmer TTS</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, "Noto Sans Khmer", sans-serif;
+      background: #111827; color: #f9fafb; min-height: 100vh;
+      display: grid; place-items: center; padding: 20px;
+    }
+    .card {
+      width: min(900px, 100%); background: #1f2937; border-radius: 20px;
+      padding: 28px; box-shadow: 0 20px 60px #0006;
+    }
+    h1 { margin-top: 0; }
+    textarea {
+      width: 100%; min-height: 260px; resize: vertical; border-radius: 14px;
+      border: 1px solid #4b5563; background: #111827; color: white;
+      padding: 16px; font-size: 18px; line-height: 1.7;
+    }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+    select, input, button {
+      border-radius: 10px; border: 1px solid #4b5563; padding: 12px 14px;
+      font-size: 16px;
+    }
+    select, input { background: #111827; color: white; }
+    button {
+      background: #7c3aed; color: white; border: 0; cursor: pointer;
+      font-weight: 700;
+    }
+    button:disabled { opacity: .6; cursor: wait; }
+    audio { width: 100%; margin-top: 20px; }
+    #status { margin-top: 14px; color: #c4b5fd; white-space: pre-wrap; }
+    .count { color: #9ca3af; margin-top: 6px; }
+    small { color: #9ca3af; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>🔊 Khmer TTS</h1>
+    <p>បញ្ចូលអត្ថបទខ្មែរ ហើយបង្កើតសំឡេង MP3។</p>
+
+    <textarea id="text" maxlength="5000"
+      placeholder="ឧទាហរណ៍៖ សួស្តី! នេះជាកម្មវិធីបង្កើតសំឡេងភាសាខ្មែរ។"></textarea>
+    <div class="count"><span id="count">0</span> / 5000 តួ</div>
+
+    <div class="row">
+      <label>សំឡេង:
+        <select id="gender">
+          <option value="female">ស្រី — Sreymom</option>
+          <option value="male">ប្រុស — Piseth</option>
+        </select>
+      </label>
+
+      <label>ល្បឿន:
+        <select id="rate">
+          <option value="-20%">យឺត -20%</option>
+          <option value="-10%">យឺត -10%</option>
+          <option value="+0%" selected>ធម្មតា</option>
+          <option value="+10%">លឿន +10%</option>
+          <option value="+20%">លឿន +20%</option>
+        </select>
+      </label>
+
+      <button id="generate">▶ បង្កើតសំឡេង</button>
+    </div>
+
+    <div id="status"></div>
+    <audio id="audio" controls></audio>
+    <p><small>សំឡេងខ្មែរ៖ Microsoft Edge TTS (Sreymom / Piseth)</small></p>
+  </main>
+
+<script>
+const text = document.getElementById("text");
+const count = document.getElementById("count");
+const button = document.getElementById("generate");
+const status = document.getElementById("status");
+const audio = document.getElementById("audio");
+
+text.addEventListener("input", () => count.textContent = text.value.length);
+
+button.addEventListener("click", async () => {
+  if (!text.value.trim()) {
+    status.textContent = "សូមបញ្ចូលអត្ថបទជាមុនសិន។";
+    return;
+  }
+
+  button.disabled = true;
+  status.textContent = "កំពុងបង្កើតសំឡេង... សូមរង់ចាំ។";
+
+  try {
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        text: text.value,
+        gender: document.getElementById("gender").value,
+        rate: document.getElementById("rate").value
+      })
+    });
+
+    if (!res.ok) {
+      let msg = "មានបញ្ហាក្នុងការបង្កើតសំឡេង។";
+      try {
+        const data = await res.json();
+        msg = data.error || msg;
+      } catch {}
+      throw new Error(msg);
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    audio.src = url;
+    audio.play().catch(() => {});
+    status.textContent = "✅ បានបង្កើតសំឡេងរួចរាល់។";
+  } catch (err) {
+    status.textContent = "❌ " + err.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
