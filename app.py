@@ -1,15 +1,20 @@
-import asyncio
+import json
 import os
 import tempfile
+import urllib.error
+import urllib.request
 
-import edge_tts
 from flask import Flask, jsonify, render_template, request, send_file
 
 app = Flask(__name__)
 
+DOSLARB_API_KEY = os.getenv("DOSLARB_API_KEY")
+
 VOICES = {
-    "female": "km-KH-SreymomNeural",
-    "male": "km-KH-PisethNeural",
+    "female": "sovann",
+    "male": "puthi",
+    "sovann": "sovann",
+    "puthi": "puthi",
 }
 
 
@@ -18,51 +23,75 @@ def index():
     return render_template("index.html")
 
 
-async def make_speech(text, voice, rate):
-    communicate = edge_tts.Communicate(text, voice, rate=rate)
-    fd, path = tempfile.mkstemp(suffix=".mp3")
-    os.close(fd)
+def make_speech(text, voice):
+    if not DOSLARB_API_KEY:
+        raise RuntimeError("DOSLARB_API_KEY is not configured")
+
+    doslarb_voice = VOICES.get(voice, "sovann")
+
+    payload = json.dumps({
+        "text": text,
+        "voice": doslarb_voice
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://doslarb.cloud/api/v1/tts",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {DOSLARB_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        },
+        method="POST",
+    )
+
     try:
-        await communicate.save(path)
+        with urllib.request.urlopen(req, timeout=120) as response:
+            audio_data = response.read()
+
+        if not audio_data:
+            raise RuntimeError("Doslarb returned empty audio")
+
+        fd, path = tempfile.mkstemp(suffix=".mp3")
+        os.close(fd)
+
+        with open(path, "wb") as f:
+            f.write(audio_data)
+
         return path
-    except Exception:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-        raise
+
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"Doslarb API error {e.code}: {error_body}"
+        )
 
 
 @app.post("/api/tts")
 def tts():
     data = request.get_json(silent=True) or {}
-    text = str(data.get("text", "")).strip()
-    gender = str(data.get("gender", "female"))
-    rate = str(data.get("rate", "+0%"))
+
+    text = (data.get("text") or "").strip()
+    voice = (data.get("voice") or "female").lower()
 
     if not text:
-        return jsonify({"error": "សូមបញ្ចូលអត្ថបទជាភាសាខ្មែរ។"}), 400
+        return jsonify({
+            "error": "សូមបញ្ចូលអត្ថបទជាមុនសិន"
+        }), 400
 
-    if len(text) > 5000:
-        return jsonify({"error": "អត្ថបទវែងពេក។ សូមកាត់ឱ្យក្រោម 5,000 តួអក្សរ។"}), 400
-
-    voice = VOICES.get(gender, VOICES["female"])
-
-    # Keep rate within a safe range.
-    try:
-        rate_num = int(rate.replace("%", "").replace("+", ""))
-        rate_num = max(-50, min(50, rate_num))
-        rate = f"{rate_num:+d}%"
-    except ValueError:
-        rate = "+0%"
+    if len(text) > 1200:
+        return jsonify({
+            "error": "អត្ថបទវែងពេក។ Doslarb Free អនុញ្ញាតប្រហែល 1200 តួអក្សរក្នុងមួយសំណើ។"
+        }), 400
 
     try:
-        path = asyncio.run(make_speech(text, voice, rate))
+        path = make_speech(text, voice)
+
         response = send_file(
             path,
             mimetype="audio/mpeg",
             as_attachment=False,
-            download_name="khmer-tts.mp3",
+            download_name="khmer-speech.mp3"
         )
 
         @response.call_on_close
@@ -73,13 +102,13 @@ def tts():
                 pass
 
         return response
-    except Exception as exc:
+
+    except Exception as e:
         return jsonify({
-            "error": "មិនអាចបង្កើតសំឡេងបានទេ។ សូមពិនិត្យ Internet ហើយសាកម្ដងទៀត។",
-            "details": str(exc),
+            "error": str(e)
         }), 500
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "5000"))
+    port = int(os.getenv("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
